@@ -135,12 +135,8 @@ class TargetThread(QThread):
                                 QThread.msleep(random.randint(100, 150))
                             target_x, target_y, target_z, target_name, target_hp = read_target_info()
                             x, y, z = read_my_wpt()
-                            if target_data['Dist'] != 0:
-                                dist_x = abs(x - target_x)
-                                dist_y = abs(y - target_y)
-                            else:
-                                dist_x = 0
-                                dist_y = 0
+                            dist_x = abs(x - target_x)
+                            dist_y = abs(y - target_y)
                             if (target_data['Dist'] >= dist_x and target_data['Dist'] >= dist_y) or target_data['Dist'] == 0:
                                 open_corpse = True
                                 if not walker_Lock.locked():
