@@ -5,232 +5,229 @@ from PyQt5.QtCore import QThread, QMutex, QMutexLocker
 from pytesseract import Output
 
 import Addresses
-from Addresses import coordinates_x, coordinates_y, screen_width, screen_height, screen_x, screen_y, walker_Lock, battle_x, battle_y
+from Addresses import coordinates_x, coordinates_y, screen_width, screen_height, screen_x, screen_y, walker_Lock, \
+    battle_x, battle_y
 from Functions.GeneralFunctions import load_items_images
 from Functions.MemoryFunctions import *
 from Functions.GeneralFunctions import WindowCapture, merge_close_points
 from Functions.KeyboardFunctions import press_hotkey, chase_monster, stay_diagonal, chaseDiagonal_monster
 from Functions.MouseFunctions import manage_collect, mouse_function
+from Looting.LootingThread import LootThread
+from Functions.KeyboardFunctions import walk
+from Functions.PathfindingFunctions import expand_waypoints, calculate_path_astar
 import cv2 as cv
 import pytesseract
 
 
-
-lootLoop = 4
-
-TITLE_BAR_OFFSET = 35
-SCALE_FACTOR = 7.0
-
-def ocr_attackMonster(targets):
-    capture_screen = WindowCapture(screen_width[1] - battle_x[0], screen_height[1] - battle_y[0],
-                                   battle_x[0] + 10, battle_y[0] + TITLE_BAR_OFFSET)
-
-    screenshot = capture_screen.get_screenshot()
-    screenshot = cv.resize(screenshot, None, fx=SCALE_FACTOR, fy=SCALE_FACTOR, interpolation=cv.INTER_CUBIC)
-    screenshot = cv.cvtColor(screenshot, cv.COLOR_BGR2GRAY)
-
-
-
-    data = pytesseract.image_to_data(screenshot, output_type=pytesseract.Output.DICT)
-
-
-    target_names = [t['Name'].lower() for t in targets]
-    n_boxes = len(data['level'])
-
-    combined_words = {}
-
-    for i in range(n_boxes):
-        text = data['text'][i].strip()
-
-        if data['conf'][i] > 60 and text:
-            block_num = data['block_num'][i]
-            line_num = data['line_num'][i]
-
-            key = (block_num, line_num)
-
-            if key not in combined_words:
-                combined_words[key] = {
-                    'text': [],
-                    'x1': data['left'][i],
-                    'y1': data['top'][i],
-                    'x2': data['left'][i] + data['width'][i],
-                    'y2': data['top'][i] + data['height'][i],
-                    'conf_sum': int(data['conf'][i]),
-                    'count': 1
-                }
-            else:
-                combined_words[key]['x2'] = max(combined_words[key]['x2'], data['left'][i] + data['width'][i])
-                combined_words[key]['y2'] = max(combined_words[key]['y2'], data['top'][i] + data['height'][i])
-                combined_words[key]['conf_sum'] += int(data['conf'][i])
-                combined_words[key]['count'] += 1
-
-            combined_words[key]['text'].append(text)
-
-    print(combined_words)
-    for key, item in combined_words.items():
-        full_word = ' '.join(item['text']).lower().strip()
-        avg_confidence = item['conf_sum'] / item['count']
-
-        if full_word in target_names:
-            print(f"Found target: '{full_word}' with {avg_confidence:.2f}% avg confidence.")
-
-            x_scaled = (item['x1'] + item['x2']) // 2
-            y_scaled = (item['y1'] + item['y2']) // 2
-
-            click_x_relative = x_scaled // int(SCALE_FACTOR)
-            click_y_relative = y_scaled // int(SCALE_FACTOR)
-
-            click_x_absolute = click_x_relative + battle_x[0]
-            click_y_absolute = click_y_relative + battle_y[0]
-
-            print("Click coords ", click_x_absolute, click_y_absolute)
-
-            mouse_function(click_x_absolute, click_y_absolute, option=2)
-            return
-
-
-
-
 class TargetThread(QThread):
 
-    def __init__(self, targets, loot_state, attack_key):
+    def __init__(self, targets, loot_state, attack_key, loot_table=None, blacklist_tiles=None):
         super().__init__()
         self.running = True
         self.targets = targets
         self.attack_key = attack_key + 1
         self.loot_state = loot_state
         self.state_lock = QMutex()
+        self.loot_table = loot_table
+        self.looting_thread = None
+        self.discovered_obstacles = set()
+
+    def __init__(self, targets, loot_state, attack_key, loot_table=None, blacklist_tiles=None):
+        super().__init__()
+        self.running = True
+        self.targets = targets
+        self.attack_key = attack_key + 1
+        self.loot_state = loot_state
+        self.state_lock = QMutex()
+        self.loot_table = loot_table
+        self.looting_thread = None
+        self.discovered_obstacles = set()
+        self.last_target_pos = None
+        self.blacklist_tiles = blacklist_tiles if blacklist_tiles else set()
 
     def run(self):
-        global lootLoop
+        my_x, my_y, my_z = read_my_wpt()
+        previous_pos = (my_x, my_y, my_z)
+        stuck_timer = 0
+        current_target_name = ""
         while self.running:
-            QThread.msleep(random.randint(10, 20))
+            QThread.msleep(random.randint(70, 100))
             try:
                 open_corpse = False
-                timer = 0
                 target_id = read_targeting_status()
                 if target_id == 0:
-                    if walker_Lock.locked() and lootLoop > 1:
-                        walker_Lock.release()
-                    if self.attack_key < 10: # Hotkey
+                    self.discovered_obstacles.clear()
+                    stuck_timer = 0
+                    self.last_target_pos = None
+
+                    if self.attack_key == 13:  # OCR Battle List Mode
+                        self.scan_and_click_battle_list_ocr()
+                    else:
                         press_hotkey(self.attack_key)
-                    else: # OCR
-                        ocr_attackMonster(self.targets)
+
                     QThread.msleep(random.randint(100, 150))
+                    target_id = read_targeting_status()
+                    if target_id == 0:
+                        if walker_Lock.locked():
+                            walker_Lock.release()
                 else:
                     target_x, target_y, target_z, target_name, target_hp = read_target_info()
+
                     if any(target['Name'] == target_name or target['Name'] == '*' for target in self.targets):
                         if any(target['Name'] == target_name for target in self.targets):
-                            target_index = next(i for i, target in enumerate(self.targets) if target['Name'] == target_name)
+                            target_index = next(
+                                i for i, target in enumerate(self.targets) if target['Name'] == target_name)
                         else:
                             target_index = 0
                         target_data = self.targets[target_index]
+                        last_hp = target_hp
+                        hp_unchanged_timer = 0
                         while read_targeting_status() != 0:
-                            if timer / 1000 > 25:
-                                if self.attack_key < 10:  # Hotkey
-                                    press_hotkey(self.attack_key)
-                                else:  # OCR
-                                    ocr_attackMonster(self.targets)
-                                timer = 0
-                                QThread.msleep(random.randint(100, 150))
-                            target_x, target_y, target_z, target_name, target_hp = read_target_info()
+                            target_current_x, target_current_y, target_current_z, target_name, target_hp = read_target_info()
+                            if target_z == target_current_z:
+                                target_x = target_current_x
+                                target_y = target_current_y
+                                target_z = target_current_z
+                            sleep_value = random.randint(40, 80)
                             x, y, z = read_my_wpt()
                             dist_x = abs(x - target_x)
                             dist_y = abs(y - target_y)
-                            if (target_data['Dist'] >= dist_x and target_data['Dist'] >= dist_y) or target_data['Dist'] == 0:
-                                open_corpse = True
+                            if (target_data['Dist'] >= dist_x and target_data['Dist'] >= dist_y) or target_data[
+                                'Dist'] == 0:
+                                if self.loot_table:
+                                    open_corpse = True
                                 if not walker_Lock.locked():
                                     walker_Lock.acquire()
-                                if target_data['Stance'] == 1:
-                                    chase_monster(x, y, target_x, target_y)
-                                elif target_data['Stance'] == 2:
-                                    stay_diagonal(x, y, target_x, target_y)
-                                elif target_data['Stance'] == 3:
-                                    chaseDiagonal_monster(x, y, target_x, target_y)
+                                if dist_x > 1 or dist_y > 1:
+                                    if target_data['Stance'] == 1:  # Chase
+                                        # Filter blacklist for current Z level and merge with discovered obstacles
+                                        blacklist_2d = {(bx, by) for bx, by, bz in self.blacklist_tiles if bz == z}
+                                        all_obstacles = self.discovered_obstacles | blacklist_2d
+                                        path = calculate_path_astar(x, y, target_x, target_y, all_obstacles)
+                                        if path:
+                                            next_step = path[0]
+                                            self.last_target_pos = (x + next_step[0], y + next_step[1])
+                                            walk(0, x, y, z, x + next_step[0], y + next_step[1], z)
+                                            QThread.msleep(random.randint(100, 200))
+                                            # Read current position after walk for accurate stuck detection
+                                            my_x, my_y, my_z = read_my_wpt()
+
+                                            # Stuck detection
+                                            if (my_x, my_y, my_z) == previous_pos:
+                                                stuck_timer += sleep_value  # Increment by actual sleep time
+                                            else:
+                                                previous_pos = (my_x, my_y, my_z)
+                                                stuck_timer = 0
+
+                                            if stuck_timer > 400:  # Stuck for 0.4 second
+                                                if self.last_target_pos:
+                                                    self.discovered_obstacles.add(self.last_target_pos)
+                                                    stuck_timer = 0
+                                                    print(f"Stuck! Added obstacle at {self.last_target_pos}")
+                                                    self.last_target_pos = None
                             else:
-                                if self.attack_key < 10:  # Hotkey
-                                    press_hotkey(self.attack_key)
-                                else:  # OCR
-                                    ocr_attackMonster(self.targets)
-                                QThread.msleep(random.randint(100, 150))
-                                if walker_Lock.locked() and lootLoop > 1:
+                                if walker_Lock.locked():
                                     walker_Lock.release()
-                            sleep_value = random.randint(90, 150)
+                                press_hotkey(self.attack_key)
+                                QThread.msleep(random.randint(100, 150))
+
                             QThread.msleep(sleep_value)
-                            timer += sleep_value
-                        if self.loot_state and open_corpse:
-                            x, y, z = read_my_wpt()
-                            x = target_x - x
-                            y = target_y - y
-                            mouse_function(coordinates_x[0] + x * Addresses.square_size, coordinates_y[0] + y * Addresses.square_size, option=1)
-                            QThread.msleep(random.randint(300, 500))
-                            lootLoop = 0
+                            hp_unchanged_timer += sleep_value
+                        x, y, z = read_my_wpt()
+                        x = target_x - x
+                        y = target_y - y
+                        corpse_x = coordinates_x[0] + x * Addresses.square_size
+                        corpse_y = coordinates_y[0] + y * Addresses.square_size
+                        if open_corpse:
+                            QThread.msleep(random.randint(400, 500))
+                            if self.looting_thread and self.looting_thread.isRunning():
+                                self.looting_thread.stop()
+                                self.looting_thread.wait(10)
+                            mouse_function(corpse_x, corpse_y, option=1)
+                            QThread.msleep(random.randint(300, 500))  # Small delay to allow container to open
+
+                            # Start new looting thread if loot table is available
+                            if self.loot_table:
+                                self.looting_thread = LootThread(self.loot_table, self.loot_state, one_shot=True)
+                                self.looting_thread.start()
+                        if 'Skin' in target_data and target_data['Skin'] > 0:
+                            press_hotkey(target_data['Skin'])
+                            QThread.msleep(random.randint(10, 50))
+                            mouse_function(corpse_x, corpse_y, option=2)
+                            QThread.msleep(random.randint(150, 250))
+
                     else:
-                        if self.attack_key < 10:  # Hotkey
-                            press_hotkey(self.attack_key)
-                        else:  # OCR
-                            ocr_attackMonster(self.targets)
+                        if walker_Lock.locked():
+                            walker_Lock.release()
+                        press_hotkey(self.attack_key)
                         QThread.msleep(random.randint(100, 150))
+
             except Exception as e:
-                ...
+                print("Exception : ", e)
 
     def update_states(self, option, state):
         with QMutexLocker(self.state_lock):
             if option == 0:
                 self.loot_state = state
 
+    def scan_and_click_battle_list_ocr(self):
+        try:
+            bx, by = Addresses.battle_x[0], Addresses.battle_y[0]
+            bw, bh = Addresses.screen_width[1], Addresses.screen_height[1]
+
+            if bh <= by or bw <= bx:
+                return
+
+            width = bw - bx
+            height = bh - by
+
+            # Capture Battle List region
+            capture = WindowCapture(width, height, bx, by)
+            screenshot = capture.get_screenshot()
+
+            # Preprocess for OCR
+            gray = cv.cvtColor(screenshot, cv.COLOR_BGR2GRAY)
+            # Thresholding to isolate text
+            _, thresh = cv.threshold(gray, 150, 255, cv.THRESH_BINARY_INV)
+
+            # Run OCR to get strings and their coordinates
+            data = pytesseract.image_to_data(thresh, output_type=Output.DICT)
+
+            n_boxes = len(data['text'])
+
+            for i in range(n_boxes):
+                text = data['text'][i].strip()
+                if not text:
+                    continue
+
+                # Check if this text matches any of our targets
+                should_click = False
+                for target in self.targets:
+                    # Case insensitive check or wildcard
+                    if target['Name'] == '*' or target['Name'].upper() == text.upper():
+                        should_click = True
+                        break
+
+                if should_click:
+                    # Calculate center of the text box
+                    x = data['left'][i]
+                    y = data['top'][i]
+                    w = data['width'][i]
+                    h = data['height'][i]
+
+                    click_x = bx + x + (w // 2)
+                    click_y = by + y + (h // 2) - Addresses.TITLE_BAR_OFFSET
+
+                    print(f"OCR Match! Clicking '{text}' at ({click_x}, {click_y})")
+                    mouse_function(click_x, click_y, option=2)
+                    return  # Exit after one click to let the targeting status update
+
+        except Exception as e:
+            print(f"Error in scan_and_click_battle_list_ocr: {e}")
+
     def stop(self):
         self.running = False
+        if self.looting_thread:
+            self.looting_thread.stop()
+            self.looting_thread.wait()
 
-
-class LootThread(QThread):
-
-    def __init__(self, loot_list, target_state):
-        super().__init__()
-        self.loot_list = loot_list
-        self.running = True
-        self.target_state = target_state
-        self.state_lock = QMutex()
-
-    def run(self):
-        global lootLoop
-        zoom_img = 3
-        load_items_images(self.loot_list)
-        item_image = Addresses.item_list
-        capture_screen = WindowCapture(screen_width[0] - screen_x[0], screen_height[0] - screen_y[0],
-                                       screen_x[0], screen_y[0])
-
-        while self.running:
-            try:
-                while (lootLoop < 2 or not self.target_state) and self.running:
-                    my_loot = lootLoop
-                    for file_name, value_list in item_image.items():
-                        for val in value_list[:-1]:
-                            if self.target_state:
-                                if my_loot != lootLoop:
-                                    break
-                            screenshot = capture_screen.get_screenshot()
-                            screenshot = cv.cvtColor(screenshot, cv.COLOR_BGR2GRAY)
-                            screenshot = cv.GaussianBlur(screenshot, (7, 7), 0)
-                            screenshot = cv.resize(screenshot, None, fx=zoom_img, fy=zoom_img, interpolation=cv.INTER_CUBIC)
-                            result = cv.matchTemplate(screenshot, val, cv.TM_CCOEFF_NORMED)
-                            locations = list(zip(*(np.where(result >= Addresses.collect_threshold))[::-1]))
-                            if locations:
-                                locations = merge_close_points(locations, 35)
-                                locations = sorted(locations, key=lambda point: (point[1], point[0]), reverse=True)
-                                locations = [[int(lx / zoom_img), int(ly / zoom_img)] for lx, ly in locations]
-                            for lx, ly in locations:
-                                manage_collect(lx, ly, value_list[-1])
-                                QThread.msleep(random.randint(400, 650))
-                                continue
-                    lootLoop += 1
-            except Exception as e:
-                print(e)
-
-    def update_states(self, state):
-        """Thread-safe method to update loot and skin states."""
-        with QMutexLocker(self.state_lock):
-            self.target_state = state
-
-    def stop(self):
-        self.running = False
