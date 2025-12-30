@@ -3,14 +3,34 @@ import pytesseract
 import Addresses
 import os
 import sys
+import platform
+import shutil
 
-# Set Tesseract Path - Intelligent discovery for EXE bundling
+# Set Tesseract Path - Multi-platform support
 if getattr(sys, 'frozen', False):
     # If running from EXE, Tesseract will be in the internal _MEIPASS folder
-    tesseract_path = os.path.join(sys._MEIPASS, 'Tesseract-OCR', 'tesseract.exe')
+    if platform.system() == 'Windows':
+        tesseract_path = os.path.join(sys._MEIPASS, 'Tesseract-OCR', 'tesseract.exe')
+    else:
+        tesseract_path = os.path.join(sys._MEIPASS, 'tesseract')
 else:
-    # If running from source, use the local installation
-    tesseract_path = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
+    # If running from source, detect OS and find Tesseract
+    if platform.system() == 'Windows':
+        # Windows: Try common installation paths
+        possible_paths = [
+            r'C:\Program Files\Tesseract-OCR\tesseract.exe',
+            r'C:\Program Files (x86)\Tesseract-OCR\tesseract.exe',
+        ]
+        tesseract_path = None
+        for path in possible_paths:
+            if os.path.exists(path):
+                tesseract_path = path
+                break
+        if not tesseract_path:
+            tesseract_path = 'tesseract'  # Try PATH
+    else:
+        # Linux/Unix: Use system tesseract
+        tesseract_path = shutil.which('tesseract') or 'tesseract'
 
 pytesseract.pytesseract.tesseract_cmd = tesseract_path
 
