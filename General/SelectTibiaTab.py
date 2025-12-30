@@ -2,9 +2,17 @@ import Addresses
 from PyQt5.QtWidgets import (QWidget, QGridLayout, QPushButton, QListWidget, QLabel, QVBoxLayout)
 from PyQt5.QtGui import QIcon
 from General.MainWindowTab import MainWindowTab
-import win32gui
-import win32process
 import psutil
+import sys
+import os
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from Platform.PlatformAbstraction import window_api, IS_WINDOWS
+
+if IS_WINDOWS:
+    import win32gui
+    import win32process
+else:
+    from Platform.PlatformAbstraction import win32gui
 
 
 class SelectTibiaTab(QWidget):
@@ -49,11 +57,15 @@ class SelectTibiaTab(QWidget):
         self.process_list = []
 
         def enum_window_callback(hwnd, _):
-            if win32gui.IsWindowVisible(hwnd):
-                window_text = win32gui.GetWindowText(hwnd)
+            if window_api.is_window_visible(hwnd):
+                window_text = window_api.get_window_text(hwnd)
                 if window_text and "Easy Bot" not in window_text:  # Filter out empty titles and bot itself
                     try:
-                        _, proc_id = win32process.GetWindowThreadProcessId(hwnd)
+                        if IS_WINDOWS:
+                            _, proc_id = win32process.GetWindowThreadProcessId(hwnd)
+                        else:
+                            _, proc_id = window_api.get_window_thread_process_id(hwnd)
+                        
                         process = psutil.Process(proc_id)
                         process_name = process.name()
                         
@@ -71,7 +83,7 @@ class SelectTibiaTab(QWidget):
                     except (psutil.NoSuchProcess, psutil.AccessDenied):
                         pass
 
-        win32gui.EnumWindows(enum_window_callback, None)
+        window_api.enum_windows(enum_window_callback)
 
     def load_tibia_button(self) -> None:
         selected_index = self.process_listwidget.currentRow()

@@ -1,7 +1,16 @@
 import random
 import threading
 import Addresses
-import win32api, win32con, win32gui
+import sys
+import os
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from Platform.PlatformAbstraction import input_api, IS_WINDOWS
+
+if IS_WINDOWS:
+    import win32api, win32con, win32gui
+else:
+    from Platform.PlatformAbstraction import win32api, win32con, win32gui
+
 mouse_lock = threading.Lock()
 
 

@@ -1,4 +1,9 @@
 <h1 align="center"> EasyBot External </h1>
+
+[![Windows](https://img.shields.io/badge/Windows-0078D6?style=for-the-badge&logo=windows&logoColor=white)](https://www.microsoft.com/windows)
+[![Linux](https://img.shields.io/badge/Linux-FCC624?style=for-the-badge&logo=linux&logoColor=black)](https://www.linux.org/)
+[![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-blue?style=for-the-badge&logo=python&logoColor=white)](https://www.python.org/)
+
 Join Our Discord
 
 [![Discord](https://invidget.switchblade.xyz/7MTnc2ueyM)](https://discord.gg/7MTnc2ueyM)
@@ -19,11 +24,15 @@ We can use the bot on multiple clients at once, and we don't have to worry about
 
 The bot works by reading the RAM addresses of a process and based on the current state of the game image.
 
+**✨ NEW: Multi-platform support!** Now works on both Windows and Linux with full feature parity!
+
 I leave the bot open source, I consider the project finished, most of it works, and if not you can boldly change it !
 
 If you liked it or learned something from this project, please leave a star :star:
 
 # Table of contents
+- [Platform Support](#platform-support)
+- [Installation](#installation)
 - [Needed Libs to Run](#Needed-Python-and-Libs-to-Run)
 - [Features Status](#Features-Status)
 - [Works On](#Currently-Works-On)
@@ -32,13 +41,74 @@ If you liked it or learned something from this project, please leave a star :sta
 - [How To Add New OT Client](#How-To-Add-New-OT-Client)
 - [How To Make Executable](#How-To-Make-Executable)
 - [What Next](#What-Next)
+
+# Platform Support
+
+| Platform | Status | Notes |
+|----------|--------|-------|
+| ✅ Windows 10/11 | Fully Supported | Native pywin32 support |
+| ✅ Linux (Ubuntu/Debian) | Fully Supported | Xlib-based implementation |
+| ⚠️ Linux (Wayland) | Limited | Use X11 session for best compatibility |
+| ❌ macOS | Not Supported | Contributions welcome |
+
+# Installation
+
+## 🪟 Windows
+
+### 1. Install Python 3.10+
+Download from [python.org](https://www.python.org/downloads/)
+
+### 2. Install Tesseract OCR
+Download and install from [GitHub](https://github.com/UB-Mannheim/tesseract/wiki)
+- Default path: `C:\Program Files\Tesseract-OCR\tesseract.exe`
+
+### 3. Install Python dependencies
+```bash
+python -m pip install -r requirements.txt
+```
+
+### 4. Run the bot
+```bash
+python StartBot.py
+```
+
+## 🐧 Linux
+
+See detailed instructions in [INSTALL_LINUX.md](INSTALL_LINUX.md)
+
+### Quick start (Ubuntu/Debian):
+```bash
+# Install system dependencies
+sudo apt update
+sudo apt install -y python3 python3-pip tesseract-ocr python3-pyqt5 python3-xlib
+
+# Install Python packages
+pip3 install -r requirements.txt
+
+# Configure ptrace permissions (for memory reading)
+echo 0 | sudo tee /proc/sys/kernel/yama/ptrace_scope
+
+# Run the bot
+python3 StartBot.py
+```
+
 # Needed Python and Libs to Run
 
 - [![Python 3.10.0](https://img.shields.io/badge/python-3.10.0-blue.svg)](https://www.python.org/downloads/release/python-3100/)
 
-- ```bash
-  python -m pip install -r requirements.txt
-  ```
+### Windows:
+```bash
+python -m pip install -r requirements.txt
+```
+
+### Linux:
+```bash
+pip3 install -r requirements.txt
+```
+
+**Platform-specific dependencies:**
+- **Windows**: pywin32 (installed automatically)
+- **Linux**: python-xlib (installed automatically)
 
 # Features Status
 - [Auto Healing](#Auto-Healing-Module) : :heavy_check_mark:

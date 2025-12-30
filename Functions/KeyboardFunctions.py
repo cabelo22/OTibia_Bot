@@ -1,11 +1,19 @@
 import random
 import time
-import win32api
-import win32gui
 import Addresses
 from Addresses import rParam, lParam, coordinates_x, coordinates_y
 from Functions.MouseFunctions import mouse_function
-import win32con
+import sys
+import os
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from Platform.PlatformAbstraction import IS_WINDOWS
+
+if IS_WINDOWS:
+    import win32api
+    import win32gui
+    import win32con
+else:
+    from Platform.PlatformAbstraction import win32api, win32con, win32gui
 
 def walk(wpt_direction, my_x, my_y, my_z, map_x, map_y, map_z) -> None:
     x = map_x - my_x

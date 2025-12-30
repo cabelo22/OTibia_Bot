@@ -1,9 +1,15 @@
-import win32api
-import win32con
-import win32security
 import Addresses
 import ctypes as c
 import struct
+import sys
+import os
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from Platform.PlatformAbstraction import memory_api, IS_WINDOWS
+
+if IS_WINDOWS:
+    import win32api
+    import win32con
+    import win32security
 
 # Structure for VirtualQueryEx
 class MEMORY_BASIC_INFORMATION(c.Structure):
@@ -28,7 +34,7 @@ def read_memory_address(address_read, offsets, option):
         else:
             buffer_size = 32
         buffer = c.create_string_buffer(buffer_size)
-        result = c.windll.kernel32.ReadProcessMemory(Addresses.process_handle, address, buffer, buffer_size, c.byref(c.c_size_t()))
+        result = memory_api.read_process_memory(Addresses.process_handle, address, buffer, buffer_size)
         if not result:
             return None
         match option:
@@ -70,14 +76,14 @@ def read_pointer_address(address_read, offsets, option):
             buffer_size = int(Addresses.application_architecture/8)
         buffer = c.create_string_buffer(buffer_size)
         for offset in offsets:
-            result = c.windll.kernel32.ReadProcessMemory(Addresses.process_handle, address, buffer, buffer_size, c.byref(c.c_size_t()))
+            result = memory_api.read_process_memory(Addresses.process_handle, address, buffer, buffer_size)
             if not result:
                 return None
             if buffer_size == 4:
                 address = c.c_void_p(c.cast(buffer, c.POINTER(c.c_int)).contents.value + offset)
             else:
                 address = c.c_void_p(c.cast(buffer, c.POINTER(c.c_longlong)).contents.value + offset)
-        result = c.windll.kernel32.ReadProcessMemory(Addresses.process_handle, address, buffer, buffer_size, c.byref(c.c_size_t()))
+        result = memory_api.read_process_memory(Addresses.process_handle, address, buffer, buffer_size)
         if not result:
             return None
         match option:
@@ -217,12 +223,7 @@ def scan_memory_for_value(value, exclude_address=None):
 
 def enable_debug_privilege_pywin32():
     try:
-        hToken = win32security.OpenProcessToken(
-            win32api.GetCurrentProcess(),
-            win32con.TOKEN_ADJUST_PRIVILEGES | win32con.TOKEN_QUERY
-        )
-        privilege_id = win32security.LookupPrivilegeValue(None, win32security.SE_DEBUG_NAME)
-        win32security.AdjustTokenPrivileges(hToken, False, [(privilege_id, win32con.SE_PRIVILEGE_ENABLED)])
+        return memory_api.enable_debug_privilege()
         return True
     except Exception as e:
         print("Error:", e)

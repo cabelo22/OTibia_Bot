@@ -2,9 +2,6 @@ import io
 import urllib
 
 import requests
-import win32con
-import win32gui
-import win32ui
 from PIL import Image, ImageSequence, ImageFile
 import numpy as np
 import cv2 as cv
@@ -14,6 +11,16 @@ from bs4 import BeautifulSoup
 import Addresses
 import os
 import json
+import sys
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from Platform.PlatformAbstraction import screen_api, window_api, IS_WINDOWS
+
+if IS_WINDOWS:
+    import win32con
+    import win32gui
+    import win32ui
+else:
+    from Platform.PlatformAbstraction import win32con, win32gui
 
 
 def load_items_images(list_widget) -> None:
@@ -55,27 +62,31 @@ def merge_close_points(points, distance_threshold):
 class WindowCapture:
     def __init__(self, w, h, x, y):
         window_name = Addresses.game_name
-        self.hwnd = win32gui.FindWindow(None, window_name)
+        self.hwnd = window_api.find_window(window_title=window_name)
         self.w = w
         self.h = h
         self.x = x
         self.y = y
 
     def get_screenshot(self):
-        wDC = win32gui.GetWindowDC(self.hwnd)
-        dc_obj = win32ui.CreateDCFromHandle(wDC)
-        cDC = dc_obj.CreateCompatibleDC()
-        data_bitmap = win32ui.CreateBitmap()
-        data_bitmap.CreateCompatibleBitmap(dc_obj, self.w, self.h)
-        cDC.SelectObject(data_bitmap)
-        cDC.BitBlt((0, 0), (self.w, self.h), dc_obj, (self.x, self.y), win32con.SRCCOPY)
-        signed_ints_array = data_bitmap.GetBitmapBits(True)
-        img = np.frombuffer(signed_ints_array, dtype='uint8')
-        img.shape = (self.h, self.w, 4)
-        dc_obj.DeleteDC()
-        cDC.DeleteDC()
-        win32gui.ReleaseDC(self.hwnd, wDC)
-        win32gui.DeleteObject(data_bitmap.GetHandle())
+        if IS_WINDOWS:
+            wDC = win32gui.GetWindowDC(self.hwnd)
+            dc_obj = win32ui.CreateDCFromHandle(wDC)
+            cDC = dc_obj.CreateCompatibleDC()
+            data_bitmap = win32ui.CreateBitmap()
+            data_bitmap.CreateCompatibleBitmap(dc_obj, self.w, self.h)
+            cDC.SelectObject(data_bitmap)
+            cDC.BitBlt((0, 0), (self.w, self.h), dc_obj, (self.x, self.y), win32con.SRCCOPY)
+            signed_ints_array = data_bitmap.GetBitmapBits(True)
+            img = np.frombuffer(signed_ints_array, dtype='uint8')
+            img.shape = (self.h, self.w, 4)
+            dc_obj.DeleteDC()
+            cDC.DeleteDC()
+            win32gui.ReleaseDC(self.hwnd, wDC)
+            win32gui.DeleteObject(data_bitmap.GetHandle())
+        else:
+            img = screen_api.capture_window(self.hwnd, self.x, self.y, self.w, self.h)
+        
         img = img[..., :3]
         img = np.ascontiguousarray(img)
         return img
